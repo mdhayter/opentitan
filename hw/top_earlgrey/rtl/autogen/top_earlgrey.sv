@@ -1112,7 +1112,7 @@ module top_earlgrey #(
       .rst_ni (rstmgr_resets.rst_sys_n[rstmgr_pkg::DomainAonSel])
   );
 
-  usbdev u_usbdev (
+  usbuart u_usbdev (
 
       // Input
       .cio_sense_i         (cio_usbdev_sense_p2d),

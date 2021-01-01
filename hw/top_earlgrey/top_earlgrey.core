@@ -39,6 +39,7 @@ filesets:
       - lowrisc:ip:otp_ctrl
       - lowrisc:ip:lc_ctrl
       - lowrisc:ip:usbdev
+      - lowrisc:ip:usbuart
       - lowrisc:top_earlgrey:xbar_main
       - lowrisc:top_earlgrey:xbar_peri
       - lowrisc:ip:rstmgr

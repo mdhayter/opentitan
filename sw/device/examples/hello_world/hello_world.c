@@ -23,7 +23,7 @@ static dif_uart_t uart;
 int main(int argc, char **argv) {
   CHECK(dif_uart_init(
             (dif_uart_params_t){
-                .base_addr = mmio_region_from_addr(TOP_EARLGREY_UART_BASE_ADDR),
+                .base_addr = mmio_region_from_addr(TOP_EARLGREY_USBDEV_BASE_ADDR),
             },
             &uart) == kDifUartOk);
   CHECK(dif_uart_configure(&uart, (dif_uart_config_t){
