@@ -131,7 +131,7 @@ module usbdev_aon_wake import usbdev_pkg::*;(
     end
   end
 
-  assign wake_req_alw_o = (astate_q == AwkWoken);
+  assign wake_req_alw_o = (astate_q == AwkWoken) | (astate_q == AwkWokenUon);
 
   assign state_debug_o = astate_q;
 

@@ -114,7 +114,8 @@ static const request_reg_info_t request_reg_infos[2] = {
             .cur_req_sources_reg_offset = PWRMGR_WAKE_STATUS_REG_OFFSET,
             .bitfield =
                 {
-                    .mask = kDifPwrmgrWakeupRequestSourceOne,
+                    .mask = kDifPwrmgrWakeupRequestSourceOne |
+                            kDifPwrmgrWakeupRequestSourceTwo,
                     .index = 0,
                 },
         },
@@ -126,7 +127,7 @@ static const request_reg_info_t request_reg_infos[2] = {
             .cur_req_sources_reg_offset = PWRMGR_RESET_STATUS_REG_OFFSET,
             .bitfield =
                 {
-                    .mask = kDifPwrmgrResetRequestSourceOne,
+                 .mask = kDifPwrmgrResetRequestSourceOne,
                     .index = 0,
                 },
         },

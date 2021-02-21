@@ -7,6 +7,7 @@ foreach device_name, device_lib : sw_lib_arch_core_devices
     'hello_usbdev_' + device_name,
     sources: [
       hw_ip_usbdev_reg_h,
+      hw_ip_pwrmgr_reg_h,
       'hello_usbdev.c',
     ],
     name_suffix: 'elf',
@@ -16,6 +17,8 @@ foreach device_name, device_lib : sw_lib_arch_core_devices
       sw_lib_pinmux,
       sw_lib_dif_gpio,
       sw_lib_irq,
+      sw_lib_dif_pwrmgr,
+      sw_lib_dif_rstmgr,
       sw_lib_dif_spi_device,
       sw_lib_runtime_log,
       sw_lib_dif_uart,

@@ -10,6 +10,8 @@
 #include "sw/device/lib/dif/dif_gpio.h"
 #include "sw/device/lib/dif/dif_spi_device.h"
 #include "sw/device/lib/dif/dif_uart.h"
+#include "sw/device/lib/dif/dif_pwrmgr.h"
+#include "sw/device/lib/dif/dif_rstmgr.h"
 #include "sw/device/lib/pinmux.h"
 #include "sw/device/lib/runtime/hart.h"
 #include "sw/device/lib/runtime/log.h"
@@ -23,6 +25,7 @@
 
 // These just for the '/' printout
 #define USBDEV_BASE_ADDR TOP_EARLGREY_USBDEV_BASE_ADDR
+#include "pwrmgr_regs.h"  // Generated.
 #include "usbdev_regs.h"  // Generated.
 
 #define REG32(add) *((volatile uint32_t *)(add))
@@ -66,6 +69,8 @@ static const size_t kExpectedUsbCharsRecved = 6;
 static size_t usb_chars_recved_total;
 
 static dif_gpio_t gpio;
+static dif_pwrmgr_t pwrmgr;
+static dif_rstmgr_t rstmgr;
 static dif_spi_device_t spi;
 static dif_uart_t uart;
 
@@ -105,6 +110,21 @@ static const uint32_t kDiffMask = 2;
 static const uint32_t kUPhyMask = 4;
 
 int main(int argc, char **argv) {
+  dif_rstmgr_reset_info_bitfield_t rst_info;
+  CHECK(
+      dif_rstmgr_init(
+          (dif_rstmgr_params_t){
+              .base_addr = mmio_region_from_addr(TOP_EARLGREY_RSTMGR_AON_BASE_ADDR),
+          },
+          &rstmgr) == kDifRstmgrOk);
+  CHECK(dif_rstmgr_reset_info_get(&rstmgr, &rst_info) == kDifRstmgrOk);
+  CHECK(dif_rstmgr_reset_info_clear(&rstmgr) == kDifRstmgrOk);
+  CHECK(
+      dif_pwrmgr_init(
+          (dif_pwrmgr_params_t){
+              .base_addr = mmio_region_from_addr(TOP_EARLGREY_PWRMGR_AON_BASE_ADDR),
+          },
+          &pwrmgr) == kDifPwrmgrOk);
   CHECK(
       dif_uart_init(
           (dif_uart_params_t){
@@ -119,7 +139,9 @@ int main(int argc, char **argv) {
                                   }) == kDifUartConfigOk);
   base_uart_stdout(&uart);
 
-  pinmux_init();
+  if (rst_info & kDifRstmgrResetInfoPor) {
+    pinmux_init();
+  }
 
   CHECK(dif_spi_device_init(
             (dif_spi_device_params_t){
@@ -145,10 +167,22 @@ int main(int argc, char **argv) {
   // Enable GPIO: 0-7 and 16 is input; 8-15 is output.
   CHECK(dif_gpio_output_set_enabled_all(&gpio, 0x0ff00) == kDifGpioOk);
 
-  LOG_INFO("Hello, USB!");
-  LOG_INFO("Built at: " __DATE__ ", " __TIME__);
 
-  demo_gpio_startup(&gpio);
+  if (rst_info & kDifRstmgrResetInfoPor) {
+    LOG_INFO("Hello, USB!");
+    LOG_INFO("Built at: " __DATE__ ", " __TIME__);
+
+    demo_gpio_startup(&gpio);
+  } else {
+    LOG_INFO("RESET 0x%x", rst_info);
+  }
+  dif_pwrmgr_domain_config_t dconf;
+  CHECK(dif_pwrmgr_get_domain_config(&pwrmgr,&dconf) == kDifPwrmgrOk);
+  LOG_INFO("Dconf = 0x%x", dconf);
+  CHECK(dif_pwrmgr_set_domain_config(&pwrmgr, 0x1f) == kDifPwrmgrOk);
+  //                                     kDifPwrmgrDomainOptionUsbClockInActivePower
+  CHECK(dif_pwrmgr_set_request_sources(&pwrmgr, kDifPwrmgrReqTypeWakeup,
+                                       kDifPwrmgrWakeupRequestSourceTwo) == kDifPwrmgrOk);
 
   // Call `usbdev_init` here so that DPI will not start until the
   // simulation has finished all of the printing, which takes a while
@@ -173,33 +207,58 @@ int main(int argc, char **argv) {
 
   bool say_hello = true;
   bool pass_signaled = false;
+  uint32_t usb_ostat = 0;
+  uint32_t aow_ostat = 0;
+  uint32_t wk_ostat = 0;
   while (true) {
+    bool show_status = false;
     usbdev_poll(&usbdev);
 
     gpio_state = demo_gpio_to_log_echo(&gpio, gpio_state);
     demo_spi_to_log_echo(&spi);
 
-    while (true) {
-      size_t chars_available;
-      if (dif_uart_rx_bytes_available(&uart, &chars_available) != kDifUartOk ||
-          chars_available == 0) {
-        break;
-      }
-
+    size_t chars_available;
+    if (dif_uart_rx_bytes_available(&uart, &chars_available) == kDifUartOk &&
+        chars_available != 0) {
       uint8_t rcv_char;
       CHECK(dif_uart_bytes_receive(&uart, 1, &rcv_char, NULL) == kDifUartOk);
       CHECK(dif_uart_byte_send_polled(&uart, rcv_char) == kDifUartOk);
-
       CHECK(dif_gpio_write_all(&gpio, rcv_char << 8) == kDifGpioOk);
 
       if (rcv_char == '/') {
-        uint32_t usb_irq_state =
-            REG32(USBDEV_BASE_ADDR + USBDEV_INTR_STATE_REG_OFFSET);
-        uint32_t usb_stat = REG32(USBDEV_BASE_ADDR + USBDEV_USBSTAT_REG_OFFSET);
-        LOG_INFO("I%4x-%8x", usb_irq_state, usb_stat);
+        show_status = true;
+      } else if (rcv_char == '=') {
+        REG32(USBDEV_BASE_ADDR + USBDEV_WAKE_CONFIG_REG_OFFSET) = 1;
+      } else if (rcv_char == '-') {
+        REG32(USBDEV_BASE_ADDR + USBDEV_WAKE_CONFIG_REG_OFFSET) = 2;
       } else {
         usb_simpleserial_send_byte(&simple_serial0, rcv_char);
         usb_simpleserial_send_byte(&simple_serial1, rcv_char + 1);
+      }
+    }
+    uint32_t usb_stat = REG32(USBDEV_BASE_ADDR + USBDEV_USBSTAT_REG_OFFSET);
+    uint32_t aow_stat = REG32(USBDEV_BASE_ADDR + USBDEV_WAKE_DEBUG_REG_OFFSET);
+    uint32_t wk_stat = REG32(TOP_EARLGREY_PWRMGR_AON_BASE_ADDR + PWRMGR_WAKE_STATUS_REG_OFFSET);
+    if (((usb_stat & 0xF800) != (usb_ostat & 0xf800)) ||
+        (aow_stat != aow_ostat) || (wk_stat != wk_ostat)) {
+      show_status = true;
+    }
+    if (show_status) {
+      uint32_t usb_irq_state =
+        REG32(USBDEV_BASE_ADDR + USBDEV_INTR_STATE_REG_OFFSET);
+      LOG_INFO("I%4x-%8x-%1x-%1x", usb_irq_state, usb_stat, aow_stat, wk_stat);
+      usb_ostat = usb_stat;
+      aow_ostat = aow_stat;
+      wk_ostat = wk_stat;
+      if (aow_stat == 0x3) {
+        int res = dif_pwrmgr_low_power_set_enabled(&pwrmgr, kDifPwrmgrToggleEnabled);
+        if (res != kDifPwrmgrOk) {
+          LOG_INFO("LP fail %x", res);
+        }
+        //wait_for_interrupt();
+      }
+      if (aow_stat == 0x1) {
+        wait_for_interrupt();
       }
     }
     if (say_hello && usb_chars_recved_total > 2) {
